@@ -1,0 +1,11 @@
+Django>=5.0,<6.0
+django-cors-headers>=4.0,<5.0
+channels>=4.0,<5.0
+daphne>=4.0,<5.0
+google-genai
+pillow
+django-storages[google]
+channels-redis>=4.0,<5.0
+whitenoise>=6.0,<7.0
+python-dotenv
+psycopg2-binary>=2.9,<3.0
