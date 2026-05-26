@@ -48,6 +48,7 @@ jobs:
           region: ${{ env.REGION }}
           image: ${{ env.IMAGE_TAG }}
           env_vars: |
+            DJANGO_SETTINGS_MODULE=core.settings
             DJANGO_DEBUG=False
             GS_BUCKET_NAME=${{ secrets.GS_BUCKET_NAME }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
