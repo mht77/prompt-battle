@@ -108,7 +108,7 @@ if GS_BUCKET_NAME:
     STORAGES["default"] = {
         "BACKEND": "storages.backends.gcloud.GoogleCloudStorage",
     }
-    GS_DEFAULT_ACL = "publicRead"
+    GS_DEFAULT_ACL = None
     GS_QUERYSTRING_AUTH = False
 
 REDIS_URL = os.environ.get("REDIS_URL")
