@@ -40,11 +40,13 @@ function App() {
   const [generatedHistory, setGeneratedHistory] = useState([]);
 
   const [activeSubmission, setActiveSubmission] = useState(null);
-  const [userRating, setUserRating] = useState(4);
+  const [userRating, setUserRating] = useState(null);
   const [hasRatedActive, setHasRatedActive] = useState(false);
   const [votingResults, setVotingResults] = useState(null);
   const [submissionsList, setSubmissionsList] = useState([]);
   const [currentSubIndex, setCurrentSubIndex] = useState(0);
+  const [isStartingRound, setIsStartingRound] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
 
   const [leaderboard, setLeaderboard] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -94,7 +96,10 @@ function App() {
         sessionStorage.setItem("pt_role", "player");
         sessionStorage.setItem("pt_playerName", data.name);
         if (data.stage && data.stage !== "LOBBY") {
-          setStage(data.stage === "VOTING" ? "VOTING_PREPARATION" : data.stage);
+          let clientStage = data.stage;
+          if (clientStage === "VOTING") clientStage = "VOTING_PREPARATION";
+          if (clientStage === "RESULTS") clientStage = "LEADERBOARD";
+          setStage(clientStage);
           if (data.target_image_url) setTargetImageUrl(data.target_image_url);
           if (data.current_round) setCurrentRound(data.current_round);
         }
@@ -105,10 +110,13 @@ function App() {
         break;
 
       case "status_update":
+        setStatusMessage(data.message || message.message || "");
         break;
 
       case "round_started":
         setStage("PROMPTING");
+        setIsStartingRound(false);
+        setStatusMessage("");
         setCurrentRound(data.round_number);
         setTargetImageUrl(data.target_image_url);
         setActiveTargetPrompt(data.target_prompt || "");
@@ -129,10 +137,11 @@ function App() {
 
       case "show_submission":
         setStage("VOTING");
+        setStatusMessage("");
         setActiveSubmission(data);
         setVotingResults(null);
         setHasRatedActive(false);
-        setUserRating(4);
+        setUserRating(null);
         setTimeRemaining(voteTimeLimit);
         startTimer(voteTimeLimit);
         break;
@@ -145,6 +154,7 @@ function App() {
 
       case "prompting_ended":
         setStage("VOTING_PREPARATION");
+        setStatusMessage("");
         setSubmissionsList(data || []);
         setCurrentSubIndex(0);
         if (timerInterval.current) clearInterval(timerInterval.current);
@@ -153,12 +163,14 @@ function App() {
 
       case "leaderboard":
         setStage("LEADERBOARD");
+        setStatusMessage("");
         setLeaderboard(data);
         break;
 
       case "error": {
         const errorMsg = data?.message || message.message;
         const isFatal = WS_FATAL_ERRORS.some((e) => errorMsg?.includes(e));
+        setIsStartingRound(false);
         if (isFatal) {
           setError(errorMsg);
           disconnect();
@@ -334,6 +346,7 @@ function App() {
   const handleAdminStartRound = useCallback((e) => {
     e.preventDefault();
     if (!targetPrompt) return;
+    setIsStartingRound(true);
     setActiveTargetPrompt(targetPrompt);
     ws.current.send(
       JSON.stringify({
@@ -402,10 +415,11 @@ function App() {
     playerPromptInput, isGenerating, currentGeneratedImage, generatedHistory,
     activeSubmission, userRating, hasRatedActive, votingResults,
     submissionsList, currentSubIndex, leaderboard, isLoading, error,
+    isStartingRound, statusMessage,
 
     setPlayerName, setAdminPassword, setPromptTimeLimit, setVoteTimeLimit,
     setPlayerCount, setAskPlayerNames, setPlayerNameInput, setPlayerPromptInput,
-    setRoomCode, setTargetPrompt, setUserRating,
+    setRoomCode, setTargetPrompt, setUserRating, setStatusMessage,
 
     handleCreate, handleJoin, handlePlayerSubmitName, handleAdminStartRound,
     handlePlayerSubmitPrompt, handlePlayerRate, handleAdminShowNextSubmission,
@@ -420,6 +434,16 @@ function App() {
         {error && (
           <div className="error-banner" onClick={() => setError(null)}>
             {error}
+          </div>
+        )}
+
+        {statusMessage && (
+          <div className="loading-overlay">
+            <div className="loading-overlay-content">
+              <div className="spinner-large"></div>
+              <p className="loading-status-text">{statusMessage}</p>
+              <p className="loading-subtext">Please wait a moment...</p>
+            </div>
           </div>
         )}
 

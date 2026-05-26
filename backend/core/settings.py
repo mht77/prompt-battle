@@ -137,4 +137,14 @@ else:
         if origin.strip()
     ]
 
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CSRF_TRUSTED_ORIGINS",
+        "https://prompt-battle-erzsapt6ia-ez.a.run.app,https://prompt-battle-710763785950.europe-west4.run.app"
+    ).split(",")
+    if origin.strip()
+] + ["http://localhost:8000", "http://127.0.0.1:8000"]
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+

@@ -53,6 +53,7 @@ class Submission(models.Model):
     image = models.ImageField(upload_to="submissions/", blank=True, null=True)
     gemini_rating = models.IntegerField(null=True, blank=True)
     average_rating = models.FloatField(default=0.0)
+    is_generating = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ("round", "player")

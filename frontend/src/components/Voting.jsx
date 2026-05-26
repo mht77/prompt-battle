@@ -15,7 +15,16 @@ export default function Voting() {
     <div className="glass-panel voting-panel">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h3>Rating Submissions</h3>
-        <div className="glass-panel" style={{ padding: "10px 18px", border: "1px solid var(--accent)", color: "var(--accent)", fontSize: "1.3rem", fontWeight: "800" }}>
+        <div className="glass-panel" style={{ 
+          padding: "10px 18px", 
+          border: "1px solid var(--accent)", 
+          color: "var(--accent)", 
+          fontSize: "1.3rem", 
+          fontWeight: "800",
+          width: "120px",
+          textAlign: "center",
+          fontVariantNumeric: "tabular-nums"
+        }}>
           ⏱ {timeRemaining}s
         </div>
       </div>
@@ -57,14 +66,14 @@ export default function Voting() {
                     key={num}
                     type="button"
                     className="btn rating-button"
-                    disabled={hasRatedActive}
+                    disabled={timeRemaining <= 0}
                     onClick={() => handlePlayerRate(num)}
                     style={{
                       background: userRating === num ? "var(--success)" : "rgba(255,255,255,0.05)",
                       border: userRating === num ? "2px solid var(--success)" : "1px solid rgba(255,255,255,0.1)",
                       color: userRating === num ? "#050308" : "var(--text-primary)",
-                      cursor: hasRatedActive ? "not-allowed" : "pointer",
-                      opacity: hasRatedActive && userRating !== num ? 0.4 : 1,
+                      cursor: timeRemaining <= 0 ? "not-allowed" : "pointer",
+                      opacity: timeRemaining <= 0 && userRating !== num ? 0.4 : 1,
                       transform: userRating === num ? "scale(1.05)" : "none",
                     }}
                   >
@@ -74,7 +83,7 @@ export default function Voting() {
               </div>
               {hasRatedActive && (
                 <p style={{ color: "var(--success)", fontSize: "0.85rem", textAlign: "center", marginTop: "10px" }}>
-                  Your rating of {userRating} has been submitted. Waiting for other ratings...
+                  Your rating of {userRating} has been submitted. You can change your vote before the timer ends.
                 </p>
               )}
             </>

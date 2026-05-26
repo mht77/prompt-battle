@@ -5,6 +5,7 @@ export default function Leaderboard() {
     role, leaderboard,
     targetPrompt, setTargetPrompt,
     handleAdminStartRound,
+    isStartingRound,
   } = useGame();
 
   return (
@@ -32,8 +33,15 @@ export default function Leaderboard() {
           <form onSubmit={handleAdminStartRound} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
             <h4 style={{ marginBottom: "5px" }}>Play Another Round</h4>
             <textarea className="form-input" style={{ resize: "none", height: "80px" }} placeholder="Enter a new target prompt..." value={targetPrompt} onChange={(e) => setTargetPrompt(e.target.value)} required />
-            <button type="submit" className="btn btn-primary">
-              Start Next Round
+            <button type="submit" className="btn btn-primary" disabled={isStartingRound}>
+              {isStartingRound ? (
+                <>
+                  <div className="spinner" style={{ marginRight: "8px" }}></div>
+                  Generating Target Image...
+                </>
+              ) : (
+                "Start Next Round"
+              )}
             </button>
           </form>
         </div>

@@ -14,7 +14,7 @@ export default function Lobby() {
     playersList,
     targetPrompt, setTargetPrompt,
     handleCreate, handleJoin, handlePlayerSubmitName, handleAdminStartRound,
-    isLoading,
+    isLoading, isStartingRound,
   } = useGame();
 
   if (!wsConnected) {
@@ -129,8 +129,15 @@ export default function Lobby() {
           )}
           <label style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>Set Target Prompt for Players:</label>
           <textarea className="form-input" style={{ resize: "none", height: "80px" }} placeholder="e.g. A gorgeous cyberpunk glowing cat drinking tea on top of a floating neon skyscraper" value={targetPrompt} onChange={(e) => setTargetPrompt(e.target.value)} required />
-          <button type="submit" className="btn btn-primary">
-            Generate Target Image & Start Game
+          <button type="submit" className="btn btn-primary" disabled={isStartingRound}>
+            {isStartingRound ? (
+              <>
+                <div className="spinner" style={{ marginRight: "8px" }}></div>
+                Generating Target Image...
+              </>
+            ) : (
+              "Generate Target Image & Start Game"
+            )}
           </button>
         </form>
       ) : (

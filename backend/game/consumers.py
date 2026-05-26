@@ -215,13 +215,41 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
     async def run_prompting_timer(self, session_id, round_id, duration):
         try:
             await asyncio.sleep(duration)
+
+            # Check if there are active generations when timer ends
+            active_gens = await self.count_active_generations(round_id)
+            if active_gens > 0:
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        "type": "broadcast_status",
+                        "status": f"Waiting for late prompt generations ({active_gens} remaining)..."
+                    }
+                )
+
+            # Wait for active generations to complete (up to 10 seconds)
+            for i in range(10):
+                active_gens = await self.count_active_generations(round_id)
+                if active_gens == 0:
+                    break
+                if i > 0:
+                    await self.channel_layer.group_send(
+                        self.room_group_name,
+                        {
+                            "type": "broadcast_status",
+                            "status": f"Waiting for late prompt generations ({active_gens} remaining)..."
+                        }
+                    )
+                await asyncio.sleep(1)
+
             submissions = await self.end_prompting_stage(session_id, round_id)
             await self.channel_layer.group_send(
                 self.room_group_name,
-                {"type": "broadcast_prompting_ended", "submissions": submissions}
+                {
+                    "type": "broadcast_prompting_ended",
+                    "submissions": submissions
+                }
             )
-        except asyncio.CancelledError:
-            logger.info(f"Prompting timer cancelled for session {session_id}")
         except Exception as e:
             logger.error(f"Error in prompting timer for session {session_id}: {e}", exc_info=True)
 
@@ -236,7 +264,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
         submissions_list = []
         for player in players:
             sub, _ = Submission.objects.get_or_create(round_id=round_id, player=player)
-            if not sub.image:
+            if not sub.image and not sub.is_generating:
                 mock_bytes = generate_fallback_image(f"A blank canvas for {player.name}")
                 sub.prompt = "No prompt submitted"
                 sub.image.save(f"sub_{sub.id}_empty.jpg", ContentFile(mock_bytes), save=True)
@@ -265,8 +293,12 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             await self.send_json({"type": "error", "message": "No active round"})
             return
 
-        image_bytes = await asyncio.to_thread(generate_target_image, prompt)
-        submission, history_item = await self.save_submission_and_history(current_round, player, prompt, image_bytes)
+        await self.set_submission_generating(current_round, player, True)
+        try:
+            image_bytes = await asyncio.to_thread(generate_target_image, prompt)
+            submission, history_item = await self.save_submission_and_history(current_round, player, prompt, image_bytes)
+        finally:
+            await self.set_submission_generating(current_round, player, False)
 
         await self.send_json({
             "type": "prompt_generated",
@@ -368,6 +400,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             return
 
         session = await self.get_session(self.room_code)
+        await self.update_session_stage(session, "RESULTS")
         leaderboard = await self.get_leaderboard_data(session)
 
         await self.channel_layer.group_send(
@@ -601,3 +634,18 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
     def get_leaderboard_data(self, session):
         players = session.players.filter(is_admin=False).order_by("-score")
         return list(players.values("id", "name", "score"))
+
+    @database_sync_to_async
+    def update_session_stage(self, session, stage):
+        session.stage = stage
+        session.save()
+
+    @database_sync_to_async
+    def set_submission_generating(self, current_round, player, is_generating):
+        sub, _ = Submission.objects.get_or_create(round=current_round, player=player)
+        sub.is_generating = is_generating
+        sub.save()
+
+    @database_sync_to_async
+    def count_active_generations(self, round_id):
+        return Submission.objects.filter(round_id=round_id, is_generating=True).count()

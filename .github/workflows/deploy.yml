@@ -50,6 +50,7 @@ jobs:
           env_vars: |
             DJANGO_SETTINGS_MODULE=core.settings
             DJANGO_DEBUG=False
+            CSRF_TRUSTED_ORIGINS=https://prompt-battle-erzsapt6ia-ez.a.run.app,https://prompt-battle-710763785950.europe-west4.run.app
             GS_BUCKET_NAME=${{ secrets.GS_BUCKET_NAME }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
             ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}

@@ -25,7 +25,16 @@ export default function Prompting() {
       <div className="glass-panel battle-panel">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h3 style={{ color: "var(--secondary)" }}>Recreate This Image!</h3>
-          <div className="glass-panel" style={{ padding: "10px 18px", border: "1px solid var(--accent)", color: "var(--accent)", fontSize: "1.3rem", fontWeight: "800" }}>
+          <div className="glass-panel" style={{ 
+            padding: "10px 18px", 
+            border: "1px solid var(--accent)", 
+            color: "var(--accent)", 
+            fontSize: "1.3rem", 
+            fontWeight: "800",
+            width: "120px",
+            textAlign: "center",
+            fontVariantNumeric: "tabular-nums"
+          }}>
             ⏱ {timeRemaining}s
           </div>
         </div>
