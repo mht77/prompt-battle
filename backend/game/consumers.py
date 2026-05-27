@@ -14,6 +14,9 @@ from .gemini import generate_target_image, evaluate_image_similarity, generate_f
 
 logger = logging.getLogger(__name__)
 
+LATE_GENERATION_MAX_WAIT_SECONDS = 30
+SLIDESHOW_INTERVAL_SECONDS = 5
+
 
 class GameConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
@@ -227,8 +230,8 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                     }
                 )
 
-            # Wait for active generations to complete (up to 10 seconds)
-            for i in range(10):
+            # Wait for active generations to complete (up to 30 seconds)
+            for i in range(LATE_GENERATION_MAX_WAIT_SECONDS):
                 active_gens = await self.count_active_generations(round_id)
                 if active_gens == 0:
                     break
@@ -251,7 +254,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 }
             )
         except Exception as e:
-            logger.error(f"Error in prompting timer for session {session_id}: {e}", exc_info=True)
+            logger.error("Error in prompting timer for session %s: %s", session_id, e, exc_info=True)
 
     @database_sync_to_async
     def end_prompting_stage(self, session_id, round_id):
@@ -264,9 +267,11 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
         submissions_list = []
         for player in players:
             sub, _ = Submission.objects.get_or_create(round_id=round_id, player=player)
-            if not sub.image and not sub.is_generating:
+            if not sub.image:
+                if sub.is_generating:
+                    sub.is_generating = False
                 mock_bytes = generate_fallback_image(f"A blank canvas for {player.name}")
-                sub.prompt = "No prompt submitted"
+                sub.prompt = sub.prompt or "No prompt submitted"
                 sub.image.save(f"sub_{sub.id}_empty.jpg", ContentFile(mock_bytes), save=True)
 
             submissions_list.append({
@@ -321,6 +326,8 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
 
         submission_id = data.get("submission_id")
         submission_data = await self.get_submission_data(submission_id)
+        history = submission_data.get("history", [])
+        slideshow_delay = max(0, (len(history) - 1) * SLIDESHOW_INTERVAL_SECONDS)
 
         await self.channel_layer.group_send(
             self.room_group_name,
@@ -330,18 +337,21 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 "player_name": submission_data["player_name"],
                 "image_url": submission_data["image_url"],
                 "prompt": submission_data["prompt"],
+                "history": history,
             }
         )
-
 
         if self._voting_timer_task and not self._voting_timer_task.done():
             self._voting_timer_task.cancel()
         self._voting_timer_task = asyncio.create_task(
-            self.run_voting_timer(session.id, submission_id, session.vote_time_limit)
+            self.run_voting_timer(session.id, submission_id, session.vote_time_limit, slideshow_delay)
         )
 
-    async def run_voting_timer(self, session_id, submission_id, duration):
+    async def run_voting_timer(self, session_id, submission_id, duration, slideshow_delay=0):
         try:
+            if slideshow_delay > 0:
+                await asyncio.sleep(slideshow_delay)
+
             target_bytes, sub_bytes = await self.get_images_for_rating(submission_id)
             gemini_score_task = asyncio.create_task(
                 asyncio.to_thread(evaluate_image_similarity, target_bytes, sub_bytes)
@@ -355,8 +365,8 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 gemini_score_task.cancel()
                 gemini_score = random.randint(3, 6)
                 logger.warning(
-                    f"Gemini evaluation timed out for submission {submission_id}, "
-                    f"using fallback score {gemini_score}"
+                    "Gemini evaluation timed out for submission %s, using fallback score %s",
+                    submission_id, gemini_score
                 )
 
             results = await self.finalize_submission_score(submission_id, gemini_score)
@@ -372,9 +382,9 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 }
             )
         except asyncio.CancelledError:
-            logger.info(f"Voting timer cancelled for submission {submission_id}")
+            logger.info("Voting timer cancelled for submission %s", submission_id)
         except Exception as e:
-            logger.error(f"Error in voting timer for submission {submission_id}: {e}", exc_info=True)
+            logger.error("Error in voting timer for submission %s: %s", submission_id, e, exc_info=True)
 
     async def handle_submit_rating(self, data):
         session = await self.get_session(self.room_code)
@@ -444,7 +454,8 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 "submission_id": event["submission_id"],
                 "player_name": event["player_name"],
                 "image_url": event["image_url"],
-                "prompt": event["prompt"]
+                "prompt": event["prompt"],
+                "history": event.get("history", [])
             }
         })
 
@@ -572,10 +583,25 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
     @database_sync_to_async
     def get_submission_data(self, submission_id):
         sub = Submission.objects.get(id=submission_id)
+        history = list(sub.history.all().order_by("created_at"))
+        history_data = [
+            {
+                "image_url": item.image.url if item.image else "",
+                "prompt": item.prompt or ""
+            }
+            for item in history
+            if item.image
+        ]
+        if not history_data:
+            history_data = [{
+                "image_url": sub.image.url if sub.image else "",
+                "prompt": sub.prompt or ""
+            }]
         return {
             "player_name": sub.player.name,
             "image_url": sub.image.url if sub.image else "",
-            "prompt": sub.prompt or ""
+            "prompt": sub.prompt or "",
+            "history": history_data
         }
 
     @database_sync_to_async

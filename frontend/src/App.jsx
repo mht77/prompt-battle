@@ -9,10 +9,16 @@ import VotingPrep from "./components/VotingPrep";
 import Voting from "./components/Voting";
 import Leaderboard from "./components/Leaderboard";
 
+const checkIsHostRoute = () => {
+  return window.location.pathname.startsWith("/host") || 
+         window.location.search.includes("host") || 
+         window.location.hash.includes("host");
+};
+
 function App() {
   const [stage, setStage] = useState("LOBBY");
   const [wsConnected, setWsConnected] = useState(false);
-  const [role, setRole] = useState(window.location.pathname.startsWith("/host") ? "admin" : "player");
+  const [role, setRole] = useState(checkIsHostRoute() ? "admin" : "player");
   const [roomCode, setRoomCode] = useState("");
   const [playerName, setPlayerName] = useState("");
   const [hostName, setHostName] = useState("");
@@ -110,7 +116,7 @@ function App() {
         break;
 
       case "status_update":
-        setStatusMessage(data.message || message.message || "");
+        setStatusMessage(message.message || "");
         break;
 
       case "round_started":
@@ -143,7 +149,9 @@ function App() {
         setHasRatedActive(false);
         setUserRating(null);
         setTimeRemaining(voteTimeLimit);
-        startTimer(voteTimeLimit);
+        if (!data.history || data.history.length <= 1) {
+          startTimer(voteTimeLimit);
+        }
         break;
 
       case "voting_ended":
@@ -279,7 +287,7 @@ function App() {
     const savedPlayerId = sessionStorage.getItem("pt_playerId");
     const savedRole = sessionStorage.getItem("pt_role");
     if (savedRoom && savedPlayerId && savedRole) {
-      const isHostRoute = window.location.pathname.startsWith("/host");
+      const isHostRoute = checkIsHostRoute();
       if ((isHostRoute && savedRole === "admin") || (!isHostRoute && savedRole === "player")) {
         setRoomCode(savedRoom);
         setPlayerId(parseInt(savedPlayerId));
@@ -306,7 +314,7 @@ function App() {
     reconnectAttempts.current = 0;
     setWsConnected(false);
     setStage("LOBBY");
-    setRole(window.location.pathname.startsWith("/host") ? "admin" : "player");
+    setRole(checkIsHostRoute() ? "admin" : "player");
     setRoomCode("");
     setPlayerName("");
     setHostName("");
@@ -423,7 +431,7 @@ function App() {
 
     handleCreate, handleJoin, handlePlayerSubmitName, handleAdminStartRound,
     handlePlayerSubmitPrompt, handlePlayerRate, handleAdminShowNextSubmission,
-    handleAdminShowLeaderboard, disconnect,
+    handleAdminShowLeaderboard, disconnect, startTimer,
   };
 
   return (

@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { useGame } from "../GameContext";
 import { getImageUrl } from "../utils";
 
@@ -7,9 +8,48 @@ export default function Voting() {
     userRating, hasRatedActive, votingResults,
     submissionsList, currentSubIndex,
     handlePlayerRate, handleAdminShowNextSubmission, handleAdminShowLeaderboard,
+    startTimer, voteTimeLimit,
   } = useGame();
 
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [isSlideshowPlaying, setIsSlideshowPlaying] = useState(false);
+
+  useEffect(() => {
+    setCurrentSlideIndex(0);
+    if (activeSubmission?.history && activeSubmission.history.length > 1) {
+      setIsSlideshowPlaying(true);
+    } else {
+      setIsSlideshowPlaying(false);
+    }
+  }, [activeSubmission]);
+
+  useEffect(() => {
+    if (!isSlideshowPlaying || !activeSubmission?.history) return;
+
+    const interval = setInterval(() => {
+      setCurrentSlideIndex((prevIndex) => {
+        if (prevIndex >= activeSubmission.history.length - 1) {
+          clearInterval(interval);
+          setIsSlideshowPlaying(false);
+          startTimer(voteTimeLimit);
+          return prevIndex;
+        }
+        return prevIndex + 1;
+      });
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [isSlideshowPlaying, activeSubmission, startTimer, voteTimeLimit]);
+
   if (!activeSubmission) return null;
+
+  const displayImage = isSlideshowPlaying && activeSubmission?.history 
+    ? activeSubmission.history[currentSlideIndex]?.image_url 
+    : activeSubmission.image_url;
+
+  const displayPrompt = isSlideshowPlaying && activeSubmission?.history 
+    ? activeSubmission.history[currentSlideIndex]?.prompt 
+    : activeSubmission.prompt;
 
   return (
     <div className="glass-panel voting-panel">
@@ -25,17 +65,39 @@ export default function Voting() {
           textAlign: "center",
           fontVariantNumeric: "tabular-nums"
         }}>
-          ⏱ {timeRemaining}s
+          {isSlideshowPlaying && activeSubmission?.history 
+            ? `🎬 ${currentSlideIndex + 1}/${activeSubmission.history.length}` 
+            : `⏱ ${timeRemaining}s`}
         </div>
       </div>
 
+      {isSlideshowPlaying && activeSubmission?.history && (
+        <div style={{ textAlign: "center", marginBottom: "10px" }}>
+          <span style={{ 
+            background: "rgba(0, 229, 255, 0.15)", 
+            color: "var(--primary)", 
+            padding: "4px 12px", 
+            borderRadius: "20px", 
+            fontSize: "0.8rem", 
+            fontWeight: "700",
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+            border: "1px solid rgba(0, 229, 255, 0.3)"
+          }}>
+            Attempt {currentSlideIndex + 1} of {activeSubmission.history.length}
+          </span>
+        </div>
+      )}
+
       <div className="voting-image-container">
-        <img src={getImageUrl(activeSubmission.image_url)} alt="Submission" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+        <img src={getImageUrl(displayImage)} alt="Submission" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
       </div>
 
       <div style={{ textAlign: "center" }}>
-        <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", marginBottom: "5px" }}>Player Prompt:</p>
-        <p style={{ fontStyle: "italic", fontSize: "1.1rem", marginBottom: "20px" }}>"{activeSubmission.prompt}"</p>
+        <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", marginBottom: "5px" }}>
+          {isSlideshowPlaying ? "Attempt Prompt:" : "Final Player Prompt:"}
+        </p>
+        <p style={{ fontStyle: "italic", fontSize: "1.1rem", marginBottom: "20px" }}>"{displayPrompt}"</p>
       </div>
 
       {role === "player" ? (
@@ -45,6 +107,13 @@ export default function Voting() {
               <h4 style={{ color: "var(--secondary)", fontSize: "1.3rem", fontWeight: "bold" }}>Rating complete!</h4>
               <span>Gemini Similarity Rating: <strong style={{ color: "var(--success)" }}>{votingResults.gemini_score}/7</strong></span>
               <span>Average Final Score: <strong style={{ color: "var(--primary)" }}>{votingResults.average_score.toFixed(1)}/7</strong></span>
+            </div>
+          ) : isSlideshowPlaying ? (
+            <div style={{ textAlign: "center", padding: "15px 0", color: "var(--text-secondary)" }}>
+              <h4 style={{ color: "var(--secondary)", marginBottom: "8px" }}>Reviewing Attempts...</h4>
+              <p style={{ fontSize: "0.9rem" }}>
+                Voting will open as soon as the slideshow reaches the final image.
+              </p>
             </div>
           ) : playerName === activeSubmission.player_name ? (
             <div style={{ textAlign: "center", padding: "10px 0" }}>
@@ -93,7 +162,9 @@ export default function Voting() {
         <div style={{ display: "flex", flexDirection: "column", gap: "20px", alignItems: "center" }}>
           {!votingResults ? (
             <>
-              <p className="pulse-slow" style={{ color: "var(--secondary)" }}>Voting in progress...</p>
+              <p className="pulse-slow" style={{ color: "var(--secondary)" }}>
+                {isSlideshowPlaying ? "Reviewing attempts..." : "Voting in progress..."}
+              </p>
               <p style={{ fontSize: "0.9rem", color: "var(--text-muted)" }}>Gemini is automatically rating the submission similarity.</p>
             </>
           ) : (

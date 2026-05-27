@@ -46,16 +46,18 @@ export default function Lobby() {
                   <input type="number" className="form-input" value={playerCount} onChange={(e) => setPlayerCount(parseInt(e.target.value) || 0)} required />
                 </div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "5px" }}>
-                <input
-                  type="checkbox"
-                  id="askPlayerNames"
-                  checked={askPlayerNames}
-                  onChange={(e) => setAskPlayerNames(e.target.checked)}
-                  style={{ cursor: "pointer", width: "18px", height: "18px", accentColor: "var(--secondary)" }}
-                />
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "5px" }}>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    id="askPlayerNames"
+                    checked={askPlayerNames}
+                    onChange={(e) => setAskPlayerNames(e.target.checked)}
+                  />
+                  <span className="slider"></span>
+                </label>
                 <label htmlFor="askPlayerNames" style={{ fontSize: "0.9rem", color: "var(--text-secondary)", cursor: "pointer", userSelect: "none" }}>
-                  Ask players to enter custom names
+                  Allow players to enter custom names/nicknames
                 </label>
               </div>
               <button type="submit" className="btn btn-primary" style={{ marginTop: "10px" }} disabled={isLoading}>
