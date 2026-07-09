@@ -107,6 +107,12 @@ export default function Lobby() {
                 {isLoading ? (<><div className="spinner"></div> Joining...</>) : "Join Game"}
               </button>
             </form>
+            <div style={{ textAlign: "center", marginTop: "24px", paddingTop: "20px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "12px" }}>Want to host instead?</p>
+              <button className="btn btn-secondary" style={{ width: "100%" }} onClick={() => window.location.href = "/host"}>
+                Host a Game
+              </button>
+            </div>
           </div>
         )}
       </div>
