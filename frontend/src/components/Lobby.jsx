@@ -15,6 +15,7 @@ export default function Lobby() {
     targetPrompt, setTargetPrompt,
     handleCreate, handleJoin, handlePlayerSubmitName, handleAdminStartRound,
     isLoading, isStartingRound,
+    wordLimit, setWordLimit,
   } = useGame();
 
   if (!wsConnected) {
@@ -35,11 +36,11 @@ export default function Lobby() {
               <div className="settings-grid">
                 <div>
                   <label style={{ display: "block", marginBottom: "8px", fontSize: "0.85rem", color: "var(--text-secondary)" }}>Prompt Limit (s)</label>
-                  <input type="number" className="form-input" value={promptTimeLimit} onChange={(e) => setPromptTimeLimit(parseInt(e.target.value) || 0)} required />
+                  <input type="number" className="form-input" min={60} value={promptTimeLimit} onChange={(e) => setPromptTimeLimit(parseInt(e.target.value) || 0)} required />
                 </div>
                 <div>
                   <label style={{ display: "block", marginBottom: "8px", fontSize: "0.85rem", color: "var(--text-secondary)" }}>Vote Limit (s)</label>
-                  <input type="number" className="form-input" value={voteTimeLimit} onChange={(e) => setVoteTimeLimit(parseInt(e.target.value) || 0)} required />
+                  <input type="number" className="form-input" min={15} value={voteTimeLimit} onChange={(e) => setVoteTimeLimit(parseInt(e.target.value) || 0)} required />
                 </div>
                 <div>
                   <label style={{ display: "block", marginBottom: "8px", fontSize: "0.85rem", color: "var(--text-secondary)" }}>Players Limit</label>
@@ -59,6 +60,35 @@ export default function Lobby() {
                 <label htmlFor="askPlayerNames" style={{ fontSize: "0.9rem", color: "var(--text-secondary)", cursor: "pointer", userSelect: "none" }}>
                   Allow players to enter custom names/nicknames
                 </label>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      id="enableWordLimit"
+                      checked={wordLimit !== null}
+                      onChange={(e) => setWordLimit(e.target.checked ? 10 : null)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                  <label htmlFor="enableWordLimit" style={{ fontSize: "0.9rem", color: "var(--text-secondary)", cursor: "pointer", userSelect: "none" }}>
+                    Enable optional round word limit
+                  </label>
+                </div>
+                {wordLimit !== null && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", marginLeft: "56px" }}>
+                    <label style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>Max words:</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      style={{ width: "80px", padding: "8px 12px" }}
+                      min={1}
+                      value={wordLimit}
+                      onChange={(e) => setWordLimit(Math.max(1, parseInt(e.target.value) || 1))}
+                    />
+                  </div>
+                )}
               </div>
               <button type="submit" className="btn btn-primary" style={{ marginTop: "10px" }} disabled={isLoading}>
                 {isLoading ? (<><div className="spinner"></div> Creating...</>) : "Create Lobby"}

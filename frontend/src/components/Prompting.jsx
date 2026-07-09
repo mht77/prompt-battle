@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import { useGame } from "../GameContext";
 import { getImageUrl } from "../utils";
+import { useSound } from "../hooks/useSound";
 
 export default function Prompting() {
   const {
@@ -8,7 +10,16 @@ export default function Prompting() {
     isGenerating, currentGeneratedImage, generatedHistory,
     playersList,
     handlePlayerSubmitPrompt,
+    wordLimit,
   } = useGame();
+
+  const { playTick } = useSound();
+
+  useEffect(() => {
+    if (timeRemaining <= 5 && timeRemaining > 0) {
+      playTick(timeRemaining <= 3);
+    }
+  }, [timeRemaining, playTick]);
 
   if (!targetImageUrl) {
     return (
@@ -25,7 +36,7 @@ export default function Prompting() {
       <div className="glass-panel battle-panel">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h3 style={{ color: "var(--secondary)" }}>Recreate This Image!</h3>
-          <div className="glass-panel" style={{ 
+          <div className={`glass-panel ${timeRemaining > 0 && timeRemaining <= 10 ? "timer-urgent" : ""}`} style={{ 
             padding: "10px 18px", 
             border: "1px solid var(--accent)", 
             color: "var(--accent)", 
@@ -56,7 +67,12 @@ export default function Prompting() {
               <h3 style={{ marginBottom: "15px" }}>Your Prompt Generation</h3>
               <form onSubmit={handlePlayerSubmitPrompt} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
                 <textarea className="form-input" style={{ resize: "none", height: "100px" }} placeholder="Type your descriptive prompt to match the target image..." value={playerPromptInput} onChange={(e) => setPlayerPromptInput(e.target.value)} required disabled={isGenerating || timeRemaining <= 0} />
-                <button type="submit" className="btn btn-primary" disabled={isGenerating || timeRemaining <= 0}>
+                {wordLimit && (
+                  <div className={`word-counter ${playerPromptInput.trim().split(/\s+/).filter(Boolean).length > wordLimit ? "over-limit" : "within-limit"}`}>
+                    {playerPromptInput.trim().split(/\s+/).filter(Boolean).length} / {wordLimit} words
+                  </div>
+                )}
+                <button type="submit" className="btn btn-primary" disabled={isGenerating || timeRemaining <= 0 || (wordLimit && playerPromptInput.trim().split(/\s+/).filter(Boolean).length > wordLimit)}>
                   {isGenerating ? (
                     <><div className="spinner"></div> Generating Image...</>
                   ) : timeRemaining <= 0 ? (

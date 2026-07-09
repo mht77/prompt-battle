@@ -1,5 +1,21 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 
+@property --mesh-color-1 {
+  syntax: '<color>';
+  initial-value: rgba(30, 0, 80, 0.5);
+  inherits: true;
+}
+@property --mesh-color-2 {
+  syntax: '<color>';
+  initial-value: rgba(0, 50, 120, 0.4);
+  inherits: true;
+}
+@property --mesh-color-3 {
+  syntax: '<color>';
+  initial-value: rgba(0, 20, 60, 0.3);
+  inherits: true;
+}
+
 :root {
   --bg-main: radial-gradient(circle at 50% 50%, #0d0f12 0%, #000000 100%);
   --bg-card: rgba(255, 255, 255, 0.02);
@@ -38,12 +54,74 @@
 }
 
 body {
-  background: var(--bg-main);
+  background: #050308;
   color: var(--text-primary);
   font-family: var(--font-body);
   min-height: 100vh;
   overflow-x: hidden;
   line-height: 1.6;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 30%, var(--mesh-color-1, rgba(30, 0, 80, 0.5)) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 80% at 80% 70%, var(--mesh-color-2, rgba(0, 50, 120, 0.4)) 0%, transparent 70%),
+    radial-gradient(ellipse 70% 50% at 50% 50%, var(--mesh-color-3, rgba(0, 20, 60, 0.3)) 0%, transparent 70%);
+  animation: mesh-shift 12s ease-in-out infinite alternate;
+  transition: --mesh-color-1 2s ease, --mesh-color-2 2s ease, --mesh-color-3 2s ease;
+}
+
+@keyframes mesh-shift {
+  0% {
+    background-position: 0% 0%, 100% 100%, 50% 50%;
+    transform: scale(1) rotate(0deg);
+  }
+  50% {
+    background-position: 30% 20%, 70% 80%, 40% 60%;
+    transform: scale(1.05) rotate(1deg);
+  }
+  100% {
+    background-position: 10% 40%, 90% 60%, 60% 30%;
+    transform: scale(1) rotate(-1deg);
+  }
+}
+
+[data-phase="lobby"] {
+  --mesh-color-1: rgba(30, 0, 80, 0.5);
+  --mesh-color-2: rgba(20, 0, 60, 0.4);
+  --mesh-color-3: rgba(10, 5, 40, 0.3);
+}
+
+[data-phase="prompting"] {
+  --mesh-color-1: rgba(0, 60, 150, 0.45);
+  --mesh-color-2: rgba(0, 120, 180, 0.35);
+  --mesh-color-3: rgba(80, 0, 160, 0.3);
+}
+
+[data-phase="prompting"][data-urgent="true"] {
+  --mesh-color-1: rgba(200, 60, 0, 0.5);
+  --mesh-color-2: rgba(180, 100, 0, 0.4);
+  --mesh-color-3: rgba(120, 0, 60, 0.35);
+}
+
+body[data-phase="prompting"][data-urgent="true"]::before {
+  animation-duration: 3s;
+}
+
+[data-phase="voting"] {
+  --mesh-color-1: rgba(200, 100, 0, 0.4);
+  --mesh-color-2: rgba(180, 60, 0, 0.35);
+  --mesh-color-3: rgba(120, 40, 0, 0.3);
+}
+
+[data-phase="results"] {
+  --mesh-color-1: rgba(180, 150, 0, 0.4);
+  --mesh-color-2: rgba(0, 160, 80, 0.3);
+  --mesh-color-3: rgba(120, 100, 0, 0.25);
 }
 
 h1, h2, h3, h4, h5, h6 {

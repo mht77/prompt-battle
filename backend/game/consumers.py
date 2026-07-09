@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 LATE_GENERATION_MAX_WAIT_SECONDS = 30
 SLIDESHOW_INTERVAL_SECONDS = 5
+MIN_PROMPT_TIME_LIMIT = 60
+MIN_VOTE_TIME_LIMIT = 15
 
 
 class GameConsumer(AsyncJsonWebsocketConsumer):
@@ -51,6 +53,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             "show_submission": self.handle_show_submission,
             "submit_rating": self.handle_submit_rating,
             "show_leaderboard": self.handle_show_leaderboard,
+            "send_emoji": self.handle_send_emoji,
         }
         handler = handler_map.get(event_type)
         if handler:
@@ -70,15 +73,23 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             prompt_limit = int(data.get("prompt_time_limit", 60))
             vote_limit = int(data.get("vote_time_limit", 15))
             player_count = int(data.get("player_count", 4))
-            if prompt_limit <= 0 or vote_limit <= 0 or player_count <= 0:
+            if prompt_limit < MIN_PROMPT_TIME_LIMIT or vote_limit < MIN_VOTE_TIME_LIMIT or player_count <= 0:
                 raise ValueError()
         except (ValueError, TypeError):
-            await self.send_json({"type": "error", "message": "Time limits and player count must be positive integers"})
+            await self.send_json({"type": "error", "message": f"Prompt time must be at least {MIN_PROMPT_TIME_LIMIT}s, vote time at least {MIN_VOTE_TIME_LIMIT}s, and player count must be positive"})
             return
 
         ask_player_names = bool(data.get("ask_player_names", False))
+        word_limit = data.get("word_limit")
+        if word_limit is not None:
+            try:
+                word_limit = int(word_limit)
+                if word_limit < 1:
+                    word_limit = None
+            except (ValueError, TypeError):
+                word_limit = None
         try:
-            session = await self.create_session(self.room_code, prompt_limit, vote_limit, player_count, ask_player_names)
+            session = await self.create_session(self.room_code, prompt_limit, vote_limit, player_count, ask_player_names, word_limit=word_limit)
         except IntegrityError:
             await self.send_json({"type": "error", "message": "Room code collision. Please try again."})
             return
@@ -98,6 +109,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 "vote_time_limit": session.vote_time_limit,
                 "player_count": session.player_count,
                 "ask_player_names": session.ask_player_names,
+                "word_limit": session.word_limit,
                 "host_name": player.name,
             }
         })
@@ -171,6 +183,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 "prompt_time_limit": session.prompt_time_limit,
                 "vote_time_limit": session.vote_time_limit,
                 "host_name": host_name,
+                "word_limit": session.word_limit,
                 "stage": session.stage,
                 "current_round": current_round,
                 "target_image_url": target_image_url,
@@ -206,6 +219,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 "target_image_url": round_obj.target_image.url,
                 "prompt_time_limit": session.prompt_time_limit,
                 "target_prompt": target_prompt,
+                "word_limit": session.word_limit,
             }
         )
 
@@ -296,6 +310,11 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
         current_round = await self.get_current_round(session)
         if not current_round:
             await self.send_json({"type": "error", "message": "No active round"})
+            return
+
+        word_limit = session.word_limit
+        if word_limit and len(prompt.split()) > word_limit:
+            await self.send_json({"type": "error", "message": f"Prompt exceeds {word_limit} word limit"})
             return
 
         await self.set_submission_generating(current_round, player, True)
@@ -438,6 +457,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 "target_image_url": event["target_image_url"],
                 "prompt_time_limit": event["prompt_time_limit"],
                 "target_prompt": event.get("target_prompt", ""),
+                "word_limit": event.get("word_limit"),
             }
         })
 
@@ -476,14 +496,39 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             "data": event["leaderboard"]
         })
 
+    async def handle_send_emoji(self, data):
+        emoji = data.get("emoji", "")
+        allowed_emojis = ["🔥", "😂", "🎨", "🤯", "💀"]
+        if emoji not in allowed_emojis:
+            return
+        player = await self.get_player(self.player_id)
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "broadcast_emoji",
+                "emoji": emoji,
+                "player_name": player.name,
+            }
+        )
+
+    async def broadcast_emoji(self, event):
+        await self.send_json({
+            "type": "emoji_reaction",
+            "data": {
+                "emoji": event["emoji"],
+                "player_name": event["player_name"],
+            }
+        })
+
     @database_sync_to_async
-    def create_session(self, code, prompt_limit, vote_limit, player_count, ask_player_names=False):
+    def create_session(self, code, prompt_limit, vote_limit, player_count, ask_player_names=False, word_limit=None):
         return GameSession.objects.create(
             code=code,
             prompt_time_limit=prompt_limit,
             vote_time_limit=vote_limit,
             player_count=player_count,
             ask_player_names=ask_player_names,
+            word_limit=word_limit,
             stage="LOBBY"
         )
 

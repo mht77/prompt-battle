@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { useGame } from "../GameContext";
 import { getImageUrl } from "../utils";
+import ComparisonSlider from "./ComparisonSlider";
+import { useSound } from "../hooks/useSound";
 
 export default function Voting() {
   const {
@@ -8,8 +10,15 @@ export default function Voting() {
     userRating, hasRatedActive, votingResults,
     submissionsList, currentSubIndex,
     handlePlayerRate, handleAdminShowNextSubmission, handleAdminShowLeaderboard,
-    startTimer, voteTimeLimit,
+    startTimer, voteTimeLimit, targetImageUrl, handleSendEmoji,
   } = useGame();
+
+  const { playPop } = useSound();
+
+  const handleRateClick = (num) => {
+    playPop();
+    handlePlayerRate(num);
+  };
 
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [isSlideshowPlaying, setIsSlideshowPlaying] = useState(false);
@@ -90,7 +99,11 @@ export default function Voting() {
       )}
 
       <div className="voting-image-container">
-        <img src={getImageUrl(displayImage)} alt="Submission" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+        {isSlideshowPlaying ? (
+          <img src={getImageUrl(displayImage)} alt="Submission" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+        ) : (
+          <ComparisonSlider targetUrl={targetImageUrl} submissionUrl={activeSubmission.image_url} />
+        )}
       </div>
 
       <div style={{ textAlign: "center" }}>
@@ -99,6 +112,23 @@ export default function Voting() {
         </p>
         <p style={{ fontStyle: "italic", fontSize: "1.1rem", marginBottom: "20px" }}>"{displayPrompt}"</p>
       </div>
+
+      {isSlideshowPlaying && (
+        <div style={{ textAlign: "center", marginBottom: "20px" }}>
+          <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "10px" }}>Tap to React!</p>
+          <div className="emoji-bar">
+            {["🔥", "😂", "🎨", "🤯", "💀"].map((emoji) => (
+              <button
+                key={emoji}
+                className="emoji-btn"
+                onClick={() => handleSendEmoji(emoji)}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {role === "player" ? (
         <div style={{ background: "rgba(255,255,255,0.02)", padding: "25px", borderRadius: "var(--radius-md)", border: "var(--border-glass)", display: "flex", flexDirection: "column", gap: "20px" }}>
@@ -134,9 +164,9 @@ export default function Voting() {
                   <button
                     key={num}
                     type="button"
-                    className="btn rating-button"
+                    className={`btn rating-button ${userRating === num ? "rating-button-bounce" : ""}`}
                     disabled={timeRemaining <= 0}
-                    onClick={() => handlePlayerRate(num)}
+                    onClick={() => handleRateClick(num)}
                     style={{
                       background: userRating === num ? "var(--success)" : "rgba(255,255,255,0.05)",
                       border: userRating === num ? "2px solid var(--success)" : "1px solid rgba(255,255,255,0.1)",

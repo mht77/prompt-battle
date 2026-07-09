@@ -27,3 +27,6 @@ backend/media/
 # Node
 node_modules/
 dist/
+
+# Credentials
+gh_action_key.json

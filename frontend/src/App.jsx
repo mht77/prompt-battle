@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import "./App.css";
 import { GameContext } from "./GameContext";
 import { WS_FATAL_ERRORS } from "./utils";
@@ -8,6 +8,8 @@ import Prompting from "./components/Prompting";
 import VotingPrep from "./components/VotingPrep";
 import Voting from "./components/Voting";
 import Leaderboard from "./components/Leaderboard";
+import FloatingEmojis from "./components/FloatingEmojis";
+import { useSound, getCtx } from "./hooks/useSound";
 
 const checkIsHostRoute = () => {
   return window.location.pathname.startsWith("/host") || 
@@ -53,10 +55,14 @@ function App() {
   const [currentSubIndex, setCurrentSubIndex] = useState(0);
   const [isStartingRound, setIsStartingRound] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const [wordLimit, setWordLimit] = useState(null);
+  const [floatingEmojis, setFloatingEmojis] = useState([]);
 
   const [leaderboard, setLeaderboard] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  const { playSuccess } = useSound();
 
   const ws = useRef(null);
   const timerInterval = useRef(null);
@@ -75,6 +81,7 @@ function App() {
         setRole("admin");
         setPlayerCount(data.player_count || 4);
         setHostName(data.host_name || "Host");
+        setWordLimit(data.word_limit || null);
         setIsLoading(false);
         sessionStorage.setItem("pt_roomCode", data.code);
         sessionStorage.setItem("pt_playerId", data.player_id);
@@ -95,6 +102,7 @@ function App() {
         setVoteTimeLimit(data.vote_time_limit || 15);
         setPlayerName(data.name);
         setHostName(data.host_name || "Host");
+        setWordLimit(data.word_limit || null);
         setNeedsName(false);
         setIsLoading(false);
         sessionStorage.setItem("pt_roomCode", data.code);
@@ -132,6 +140,8 @@ function App() {
         setPlayerPromptInput("");
         setVotingResults(null);
         setHasRatedActive(false);
+        setFloatingEmojis([]);
+        if (data.word_limit) setWordLimit(data.word_limit);
         startTimer(data.prompt_time_limit);
         break;
 
@@ -139,6 +149,7 @@ function App() {
         setIsGenerating(false);
         setCurrentGeneratedImage(data.image_url);
         setGeneratedHistory(data.history || []);
+        playSuccess();
         break;
 
       case "show_submission":
@@ -148,6 +159,7 @@ function App() {
         setVotingResults(null);
         setHasRatedActive(false);
         setUserRating(null);
+        setFloatingEmojis([]);
         setTimeRemaining(voteTimeLimit);
         if (!data.history || data.history.length <= 1) {
           startTimer(voteTimeLimit);
@@ -189,6 +201,13 @@ function App() {
         setIsLoading(false);
         break;
       }
+
+      case "emoji_reaction":
+        setFloatingEmojis((prev) => [
+          ...prev,
+          { id: Date.now() + Math.random(), emoji: data.emoji },
+        ]);
+        break;
 
       default:
         break;
@@ -237,6 +256,7 @@ function App() {
               vote_time_limit: voteTimeLimit,
               player_count: playerCount,
               ask_player_names: askPlayerNames,
+              word_limit: wordLimit,
             },
           })
         );
@@ -280,7 +300,7 @@ function App() {
         }
       }
     };
-  }, [adminPassword, promptTimeLimit, voteTimeLimit, playerCount, askPlayerNames]);
+  }, [adminPassword, promptTimeLimit, voteTimeLimit, playerCount, askPlayerNames, wordLimit]);
 
   useEffect(() => {
     const savedRoom = sessionStorage.getItem("pt_roomCode");
@@ -368,6 +388,7 @@ function App() {
   const handlePlayerSubmitPrompt = useCallback((e) => {
     e.preventDefault();
     if (!playerPromptInput || isGenerating || timeRemaining <= 0) return;
+    if (wordLimit && playerPromptInput.trim().split(/\s+/).length > wordLimit) return;
     setIsGenerating(true);
     ws.current.send(
       JSON.stringify({
@@ -375,7 +396,17 @@ function App() {
         data: { prompt: playerPromptInput },
       })
     );
-  }, [playerPromptInput, isGenerating, timeRemaining]);
+  }, [playerPromptInput, isGenerating, timeRemaining, wordLimit]);
+
+  const handleSendEmoji = useCallback((emoji) => {
+    if (!ws.current || ws.current.readyState !== 1) return;
+    ws.current.send(
+      JSON.stringify({
+        type: "send_emoji",
+        data: { emoji },
+      })
+    );
+  }, []);
 
   const handlePlayerRate = useCallback((score) => {
     setUserRating(score);
@@ -415,28 +446,70 @@ function App() {
     setCurrentSubIndex((prev) => prev + 1);
   }, [currentSubIndex, submissionsList, handleAdminShowLeaderboard]);
 
+  const phaseMap = {
+    LOBBY: "lobby",
+    PROMPTING: "prompting",
+    VOTING_PREPARATION: "voting",
+    VOTING: "voting",
+    LEADERBOARD: "results",
+  };
+  const dataPhase = phaseMap[stage] || "lobby";
+  const dataUrgent = stage === "PROMPTING" && timeRemaining > 0 && timeRemaining <= 10;
+
+  useEffect(() => {
+    document.body.setAttribute("data-phase", dataPhase);
+    if (dataUrgent) {
+      document.body.setAttribute("data-urgent", "true");
+    } else {
+      document.body.removeAttribute("data-urgent");
+    }
+    return () => {
+      document.body.removeAttribute("data-phase");
+      document.body.removeAttribute("data-urgent");
+    };
+  }, [dataPhase, dataUrgent]);
+
+  useEffect(() => {
+    const resumeAudio = () => {
+      const ctx = getCtx();
+      if (ctx && ctx.state === "suspended") {
+        ctx.resume();
+      }
+    };
+    window.addEventListener("click", resumeAudio);
+    window.addEventListener("keydown", resumeAudio);
+    window.addEventListener("touchstart", resumeAudio);
+    return () => {
+      window.removeEventListener("click", resumeAudio);
+      window.removeEventListener("keydown", resumeAudio);
+      window.removeEventListener("touchstart", resumeAudio);
+    };
+  }, []);
+
   const contextValue = {
     stage, wsConnected, role, roomCode, playerName, hostName, playerId,
     playersList, askPlayerNames, needsName, playerNameInput,
-    promptTimeLimit, voteTimeLimit, playerCount, adminPassword,
+    promptTimeLimit, voteTimeLimit, playerCount, adminPassword, wordLimit,
     currentRound, targetPrompt, activeTargetPrompt, targetImageUrl, timeRemaining,
     playerPromptInput, isGenerating, currentGeneratedImage, generatedHistory,
     activeSubmission, userRating, hasRatedActive, votingResults,
     submissionsList, currentSubIndex, leaderboard, isLoading, error,
-    isStartingRound, statusMessage,
+    isStartingRound, statusMessage, floatingEmojis,
 
     setPlayerName, setAdminPassword, setPromptTimeLimit, setVoteTimeLimit,
     setPlayerCount, setAskPlayerNames, setPlayerNameInput, setPlayerPromptInput,
-    setRoomCode, setTargetPrompt, setUserRating, setStatusMessage,
+    setRoomCode, setTargetPrompt, setUserRating, setStatusMessage, setWordLimit,
 
     handleCreate, handleJoin, handlePlayerSubmitName, handleAdminStartRound,
     handlePlayerSubmitPrompt, handlePlayerRate, handleAdminShowNextSubmission,
-    handleAdminShowLeaderboard, disconnect, startTimer,
+    handleAdminShowLeaderboard, handleSendEmoji, disconnect, startTimer,
   };
 
   return (
     <GameContext.Provider value={contextValue}>
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", padding: "20px" }}>
+      <div
+        style={{ minHeight: "100vh", display: "flex", flexDirection: "column", padding: "20px" }}
+      >
         <Header />
 
         {error && (
@@ -454,6 +527,8 @@ function App() {
             </div>
           </div>
         )}
+
+        <FloatingEmojis emojis={floatingEmojis} />
 
         <main style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
           {stage === "LOBBY" && <Lobby />}

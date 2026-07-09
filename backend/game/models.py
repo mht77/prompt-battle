@@ -16,6 +16,7 @@ class GameSession(models.Model):
     player_count = models.IntegerField(default=4)
     ask_player_names = models.BooleanField(default=False)
     current_round_number = models.IntegerField(default=0)
+    word_limit = models.IntegerField(null=True, blank=True)
 
     def __str__(self):
         return f"Session {self.code} ({self.stage})"
