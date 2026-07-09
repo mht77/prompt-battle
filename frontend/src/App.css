@@ -402,6 +402,10 @@ input:checked + .slider:before {
   animation: fadeIn 0.25s ease;
 }
 
+body:has(.guide-overlay) .glass-panel:not(.guide-modal) {
+  pointer-events: none;
+}
+
 .guide-modal {
   max-width: 420px;
   width: 90%;
