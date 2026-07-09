@@ -1,4 +1,3 @@
-import os
 import asyncio
 import logging
 import random
@@ -60,11 +59,6 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             await handler(data)
 
     async def handle_create_game(self, data):
-        admin_password = data.get("admin_password")
-        expected_password = os.environ.get("ADMIN_PASSWORD", "admin")
-        if admin_password != expected_password:
-            await self.send_json({"type": "error", "message": "Invalid admin password"})
-            return
 
         admin_name = data.get("admin_name", "Host")
         if not admin_name:

@@ -34,7 +34,6 @@ function App() {
   const [promptTimeLimit, setPromptTimeLimit] = useState(60);
   const [voteTimeLimit, setVoteTimeLimit] = useState(15);
   const [playerCount, setPlayerCount] = useState(4);
-  const [adminPassword, setAdminPassword] = useState("");
 
   const [currentRound, setCurrentRound] = useState(0);
   const [targetPrompt, setTargetPrompt] = useState("");
@@ -251,7 +250,6 @@ function App() {
             type: "create_game",
             data: {
               admin_name: pName || "Host",
-              admin_password: adminPassword,
               prompt_time_limit: promptTimeLimit,
               vote_time_limit: voteTimeLimit,
               player_count: playerCount,
@@ -300,7 +298,7 @@ function App() {
         }
       }
     };
-  }, [adminPassword, promptTimeLimit, voteTimeLimit, playerCount, askPlayerNames, wordLimit]);
+  }, [promptTimeLimit, voteTimeLimit, playerCount, askPlayerNames, wordLimit]);
 
   useEffect(() => {
     const savedRoom = sessionStorage.getItem("pt_roomCode");
@@ -489,14 +487,14 @@ function App() {
   const contextValue = {
     stage, wsConnected, role, roomCode, playerName, hostName, playerId,
     playersList, askPlayerNames, needsName, playerNameInput,
-    promptTimeLimit, voteTimeLimit, playerCount, adminPassword, wordLimit,
+    promptTimeLimit, voteTimeLimit, playerCount, wordLimit,
     currentRound, targetPrompt, activeTargetPrompt, targetImageUrl, timeRemaining,
     playerPromptInput, isGenerating, currentGeneratedImage, generatedHistory,
     activeSubmission, userRating, hasRatedActive, votingResults,
     submissionsList, currentSubIndex, leaderboard, isLoading, error,
     isStartingRound, statusMessage, floatingEmojis,
 
-    setPlayerName, setAdminPassword, setPromptTimeLimit, setVoteTimeLimit,
+    setPlayerName, setPromptTimeLimit, setVoteTimeLimit,
     setPlayerCount, setAskPlayerNames, setPlayerNameInput, setPlayerPromptInput,
     setRoomCode, setTargetPrompt, setUserRating, setStatusMessage, setWordLimit,
 

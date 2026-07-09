@@ -10,7 +10,6 @@ export const getImageUrl = (url) => {
 
 export const WS_FATAL_ERRORS = [
   "Room not found",
-  "Invalid admin password",
   "Room code collision",
   "Game already in progress",
   "Game is full",

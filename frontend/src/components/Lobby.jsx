@@ -4,7 +4,6 @@ export default function Lobby() {
   const {
     wsConnected, role, needsName,
     playerName, setPlayerName,
-    adminPassword, setAdminPassword,
     promptTimeLimit, setPromptTimeLimit,
     voteTimeLimit, setVoteTimeLimit,
     playerCount, setPlayerCount,
@@ -28,10 +27,6 @@ export default function Lobby() {
               <div>
                 <label style={{ display: "block", marginBottom: "8px", fontSize: "0.85rem", color: "var(--text-secondary)" }}>Host Name</label>
                 <input type="text" className="form-input" placeholder="e.g. Captain Narrator" value={playerName} onChange={(e) => setPlayerName(e.target.value)} required />
-              </div>
-              <div>
-                <label style={{ display: "block", marginBottom: "8px", fontSize: "0.85rem", color: "var(--text-secondary)" }}>Admin Password</label>
-                <input type="password" className="form-input" placeholder="e.g. admin" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} required />
               </div>
               <div className="settings-grid">
                 <div>
