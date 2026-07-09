@@ -406,7 +406,8 @@ body:has(.guide-overlay) .glass-panel:not(.guide-modal) {
   pointer-events: none;
 }
 
-.guide-modal {
+.guide-modal,
+.guide-modal:hover {
   max-width: 420px;
   width: 90%;
   max-height: 85vh;
