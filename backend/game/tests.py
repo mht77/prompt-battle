@@ -342,6 +342,15 @@ class GameFixesTests(TransactionTestCase):
             resp = await admin_comm.receive_json_from()
             self.assertEqual(resp["type"], "round_started")
 
+            # Clients receive an absolute deadline anchored to the server clock
+            import time as time_mod
+            self.assertIn("ends_at", resp["data"])
+            self.assertIn("server_time", resp["data"])
+            self.assertAlmostEqual(
+                resp["data"]["ends_at"] - resp["data"]["server_time"], 60, delta=1
+            )
+            self.assertAlmostEqual(resp["data"]["server_time"], time_mod.time(), delta=5)
+
             # Second start while the round is running is rejected
             await admin_comm.send_json_to({"type": "start_round", "data": {"target_prompt": "another"}})
             resp = await admin_comm.receive_json_from()

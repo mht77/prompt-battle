@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import secrets
+import time
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.core.files.base import ContentFile
@@ -199,11 +200,14 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
 
         current_round = None
         target_image_url = ""
+        prompting_ends_at = None
         if session.stage in ["PROMPTING", "VOTING", "RESULTS"]:
             round_obj = await self.get_current_round(session)
             if round_obj:
                 current_round = round_obj.round_number
                 target_image_url = round_obj.target_image.url if round_obj.target_image else ""
+                if session.stage == "PROMPTING" and round_obj.started_at:
+                    prompting_ends_at = round_obj.started_at.timestamp() + session.prompt_time_limit
 
         await self.send_json({
             "type": "game_joined",
@@ -221,6 +225,8 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 "stage": session.stage,
                 "current_round": current_round,
                 "target_image_url": target_image_url,
+                "server_time": time.time(),
+                "prompting_ends_at": prompting_ends_at,
             }
         })
 
@@ -260,6 +266,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
         image_bytes = await asyncio.to_thread(generate_target_image, target_prompt)
         round_obj = await self.create_next_round(session, target_prompt, image_bytes)
 
+        now = time.time()
         await self.channel_layer.group_send(
             self.room_group_name,
             {
@@ -269,6 +276,8 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 "prompt_time_limit": session.prompt_time_limit,
                 "target_prompt": target_prompt,
                 "word_limit": session.word_limit,
+                "server_time": now,
+                "ends_at": now + session.prompt_time_limit,
             }
         )
 
@@ -412,6 +421,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
         history = submission_data.get("history", [])
         slideshow_delay = max(0, (len(history) - 1) * SLIDESHOW_INTERVAL_SECONDS)
 
+        now = time.time()
         await self.channel_layer.group_send(
             self.room_group_name,
             {
@@ -421,6 +431,9 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 "image_url": submission_data["image_url"],
                 "prompt": submission_data["prompt"],
                 "history": history,
+                "server_time": now,
+                "slideshow_ends_at": now + slideshow_delay,
+                "voting_ends_at": now + slideshow_delay + session.vote_time_limit,
             }
         )
 
@@ -529,6 +542,8 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 "prompt_time_limit": event["prompt_time_limit"],
                 "target_prompt": event.get("target_prompt", ""),
                 "word_limit": event.get("word_limit"),
+                "server_time": event.get("server_time"),
+                "ends_at": event.get("ends_at"),
             }
         })
 
@@ -546,7 +561,10 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 "player_name": event["player_name"],
                 "image_url": event["image_url"],
                 "prompt": event["prompt"],
-                "history": event.get("history", [])
+                "history": event.get("history", []),
+                "server_time": event.get("server_time"),
+                "slideshow_ends_at": event.get("slideshow_ends_at"),
+                "voting_ends_at": event.get("voting_ends_at"),
             }
         })
 

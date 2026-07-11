@@ -20,35 +20,39 @@ export default function Voting() {
     handlePlayerRate(num);
   };
 
+  const SLIDESHOW_INTERVAL_MS = 5000;
+
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [isSlideshowPlaying, setIsSlideshowPlaying] = useState(false);
 
+  // Slide index is derived from the clock rather than counted, so throttled
+  // background tabs catch up instead of drifting behind the server's schedule.
   useEffect(() => {
     setCurrentSlideIndex(0);
-    if (activeSubmission?.history && activeSubmission.history.length > 1) {
-      setIsSlideshowPlaying(true);
-    } else {
+    const history = activeSubmission?.history;
+    if (!history || history.length <= 1) {
       setIsSlideshowPlaying(false);
+      return;
     }
-  }, [activeSubmission]);
+    setIsSlideshowPlaying(true);
 
-  useEffect(() => {
-    if (!isSlideshowPlaying || !activeSubmission?.history) return;
-
+    const startMs = activeSubmission.client_received_at || Date.now();
+    const lastIndex = history.length - 1;
     const interval = setInterval(() => {
-      setCurrentSlideIndex((prevIndex) => {
-        if (prevIndex >= activeSubmission.history.length - 1) {
-          clearInterval(interval);
-          setIsSlideshowPlaying(false);
+      const idx = Math.min(Math.floor((Date.now() - startMs) / SLIDESHOW_INTERVAL_MS), lastIndex);
+      setCurrentSlideIndex(idx);
+      if (idx >= lastIndex) {
+        clearInterval(interval);
+        setIsSlideshowPlaying(false);
+        // Legacy fallback: without a server deadline the vote timer starts here
+        if (!activeSubmission.voting_ends_at) {
           startTimer(voteTimeLimit);
-          return prevIndex;
         }
-        return prevIndex + 1;
-      });
-    }, 5000);
+      }
+    }, 250);
 
     return () => clearInterval(interval);
-  }, [isSlideshowPlaying, activeSubmission, startTimer, voteTimeLimit]);
+  }, [activeSubmission, startTimer, voteTimeLimit]);
 
   if (!activeSubmission) return null;
 

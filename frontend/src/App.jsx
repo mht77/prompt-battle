@@ -69,6 +69,13 @@ function App() {
   const reconnectTimeout = useRef(null);
   const reconnectAttempts = useRef(0);
   const handleServerMessageRef = useRef(null);
+  const serverClockOffset = useRef(0);
+
+  const syncClock = (serverTimeSeconds) => {
+    if (serverTimeSeconds) {
+      serverClockOffset.current = serverTimeSeconds * 1000 - Date.now();
+    }
+  };
 
   handleServerMessageRef.current = (message) => {
     const { type, data } = message;
@@ -117,6 +124,10 @@ function App() {
           setStage(clientStage);
           if (data.target_image_url) setTargetImageUrl(data.target_image_url);
           if (data.current_round) setCurrentRound(data.current_round);
+          syncClock(data.server_time);
+          if (clientStage === "PROMPTING" && data.prompting_ends_at) {
+            startDeadlineTimer(data.prompting_ends_at);
+          }
         }
         break;
 
@@ -135,7 +146,6 @@ function App() {
         setCurrentRound(data.round_number);
         setTargetImageUrl(data.target_image_url);
         setActiveTargetPrompt(data.target_prompt || "");
-        setTimeRemaining(data.prompt_time_limit);
         setGeneratedHistory([]);
         setCurrentGeneratedImage(null);
         setPlayerPromptInput("");
@@ -143,7 +153,12 @@ function App() {
         setHasRatedActive(false);
         setFloatingEmojis([]);
         if (data.word_limit) setWordLimit(data.word_limit);
-        startTimer(data.prompt_time_limit);
+        syncClock(data.server_time);
+        if (data.ends_at) {
+          startDeadlineTimer(data.ends_at);
+        } else {
+          startTimer(data.prompt_time_limit);
+        }
         break;
 
       case "prompt_generated":
@@ -156,14 +171,19 @@ function App() {
       case "show_submission":
         setStage("VOTING");
         setStatusMessage("");
-        setActiveSubmission(data);
+        syncClock(data.server_time);
+        setActiveSubmission({ ...data, client_received_at: Date.now() });
         setVotingResults(null);
         setHasRatedActive(false);
         setUserRating(null);
         setFloatingEmojis([]);
-        setTimeRemaining(voteTimeLimit);
-        if (!data.history || data.history.length <= 1) {
-          startTimer(voteTimeLimit);
+        if (data.voting_ends_at) {
+          startDeadlineTimer(data.voting_ends_at);
+        } else {
+          setTimeRemaining(voteTimeLimit);
+          if (!data.history || data.history.length <= 1) {
+            startTimer(voteTimeLimit);
+          }
         }
         break;
 
@@ -215,19 +235,23 @@ function App() {
     }
   };
 
-  const startTimer = useCallback((seconds) => {
+  // Anchors the countdown to an absolute deadline (server clock) instead of
+  // decrementing an interval, so throttled background tabs snap back in sync.
+  const startDeadlineTimer = useCallback((endsAtSeconds) => {
     if (timerInterval.current) clearInterval(timerInterval.current);
-    setTimeRemaining(seconds);
-    timerInterval.current = setInterval(() => {
-      setTimeRemaining((prev) => {
-        if (prev <= 1) {
-          clearInterval(timerInterval.current);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    const deadlineMs = endsAtSeconds * 1000;
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((deadlineMs - (Date.now() + serverClockOffset.current)) / 1000));
+      setTimeRemaining(remaining);
+      if (remaining <= 0) clearInterval(timerInterval.current);
+    };
+    tick();
+    timerInterval.current = setInterval(tick, 500);
   }, []);
+
+  const startTimer = useCallback((seconds) => {
+    startDeadlineTimer((Date.now() + serverClockOffset.current) / 1000 + seconds);
+  }, [startDeadlineTimer]);
 
   const connectWebSocket = useCallback((code, pName, isCreate = false, rejoinPlayerId = null) => {
     intentionalDisconnect.current = false;
@@ -504,7 +528,7 @@ function App() {
 
     handleCreate, handleJoin, handlePlayerSubmitName, handleAdminStartRound,
     handlePlayerSubmitPrompt, handlePlayerRate, handleAdminShowNextSubmission,
-    handleAdminShowLeaderboard, handleSendEmoji, disconnect, startTimer,
+    handleAdminShowLeaderboard, handleSendEmoji, disconnect, startTimer, startDeadlineTimer,
   };
 
   return (
