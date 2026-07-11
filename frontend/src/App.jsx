@@ -85,6 +85,7 @@ function App() {
         sessionStorage.setItem("pt_roomCode", data.code);
         sessionStorage.setItem("pt_playerId", data.player_id);
         sessionStorage.setItem("pt_role", "admin");
+        if (data.player_token) sessionStorage.setItem("pt_playerToken", data.player_token);
         break;
 
       case "name_required":
@@ -108,6 +109,7 @@ function App() {
         sessionStorage.setItem("pt_playerId", data.player_id);
         sessionStorage.setItem("pt_role", "player");
         sessionStorage.setItem("pt_playerName", data.name);
+        if (data.player_token) sessionStorage.setItem("pt_playerToken", data.player_token);
         if (data.stage && data.stage !== "LOBBY") {
           let clientStage = data.stage;
           if (clientStage === "VOTING") clientStage = "VOTING_PREPARATION";
@@ -264,6 +266,7 @@ function App() {
             type: "join_game",
             data: {
               player_id: rejoinPlayerId,
+              player_token: sessionStorage.getItem("pt_playerToken") || undefined,
             },
           })
         );
@@ -329,6 +332,7 @@ function App() {
     sessionStorage.removeItem("pt_roomCode");
     sessionStorage.removeItem("pt_role");
     sessionStorage.removeItem("pt_playerName");
+    sessionStorage.removeItem("pt_playerToken");
     reconnectAttempts.current = 0;
     setWsConnected(false);
     setStage("LOBBY");

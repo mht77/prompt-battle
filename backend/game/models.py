@@ -27,6 +27,7 @@ class Player(models.Model):
     is_admin = models.BooleanField(default=False)
     channel_name = models.CharField(max_length=255, blank=True, null=True)
     score = models.FloatField(default=0.0)
+    token = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:
         unique_together = ("session", "name")

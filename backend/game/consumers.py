@@ -1,12 +1,13 @@
 import asyncio
 import logging
 import random
+import secrets
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.core.files.base import ContentFile
 from django.db.models import F
 from django.utils import timezone
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 
 from .models import GameSession, Player, Round, Submission, SubmissionImageHistory, Rating
 from .gemini import generate_target_image, evaluate_image_similarity, generate_fallback_image
@@ -18,6 +19,35 @@ SLIDESHOW_INTERVAL_SECONDS = 5
 MIN_PROMPT_TIME_LIMIT = 60
 MIN_VOTE_TIME_LIMIT = 15
 
+# Round timers are keyed by room code instead of living on the host's consumer,
+# so a host refresh/disconnect doesn't cancel a running round.
+TIMER_TASKS = {}
+
+
+def _clear_finished_timer(key, task):
+    if TIMER_TASKS.get(key) is task:
+        TIMER_TASKS.pop(key, None)
+
+
+def _start_room_timer(room_code, kind, coro):
+    key = (room_code, kind)
+    _cancel_room_timer(room_code, kind)
+    task = asyncio.create_task(coro)
+    TIMER_TASKS[key] = task
+    task.add_done_callback(lambda t, key=key: _clear_finished_timer(key, t))
+    return task
+
+
+def _cancel_room_timer(room_code, kind):
+    task = TIMER_TASKS.get((room_code, kind))
+    if task and not task.done():
+        task.cancel()
+
+
+def _room_timer_active(room_code, kind):
+    task = TIMER_TASKS.get((room_code, kind))
+    return task is not None and not task.done()
+
 
 class GameConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
@@ -25,17 +55,11 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
         self.room_group_name = f"game_{self.room_code}"
         self.player_id = None
         self.is_admin = False
-        self._prompting_timer_task = None
-        self._voting_timer_task = None
 
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
 
     async def disconnect(self, close_code):
-        if self._prompting_timer_task and not self._prompting_timer_task.done():
-            self._prompting_timer_task.cancel()
-        if self._voting_timer_task and not self._voting_timer_task.done():
-            self._voting_timer_task.cancel()
         if self.player_id:
             await self.set_player_channel(self.player_id, None)
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
@@ -56,7 +80,14 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
         }
         handler = handler_map.get(event_type)
         if handler:
-            await handler(data)
+            try:
+                await handler(data)
+            except Exception:
+                logger.exception("Error handling %s event in room %s", event_type, self.room_code)
+                try:
+                    await self.send_json({"type": "error", "message": "Something went wrong. Please try again."})
+                except Exception:
+                    pass
 
     async def handle_create_game(self, data):
 
@@ -98,6 +129,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             "data": {
                 "session_id": session.id,
                 "player_id": player.id,
+                "player_token": player.token,
                 "code": session.code,
                 "prompt_time_limit": session.prompt_time_limit,
                 "vote_time_limit": session.vote_time_limit,
@@ -118,6 +150,8 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
         player = None
         if rejoin_player_id:
             player = await self.get_player_by_id_and_session(rejoin_player_id, session)
+            if player and player.token and data.get("player_token") != player.token:
+                player = None
 
         if player:
             await self.set_player_channel(player.id, self.channel_name)
@@ -149,11 +183,16 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
                 if name_taken:
                     await self.send_json({"type": "error", "message": f"Name '{player_name}' is already taken"})
                     return
+                try:
+                    player = await self.create_player(session, player_name, is_admin=False, channel_name=self.channel_name)
+                except IntegrityError:
+                    await self.send_json({"type": "error", "message": f"Name '{player_name}' is already taken"})
+                    return
             else:
-                player_number = await self.get_next_player_number(session)
-                player_name = f"Player {player_number}"
-
-            player = await self.create_player(session, player_name, is_admin=False, channel_name=self.channel_name)
+                player = await self.create_auto_named_player(session, self.channel_name)
+                if not player:
+                    await self.send_json({"type": "error", "message": "Could not join the game. Please try again."})
+                    return
             self.player_id = player.id
 
         host_name = await self.get_host_name(session)
@@ -171,6 +210,7 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             "data": {
                 "session_id": session.id,
                 "player_id": player.id,
+                "player_token": player.token,
                 "name": player.name,
                 "code": session.code,
                 "player_count": session.player_count,
@@ -195,7 +235,22 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             return
 
         target_prompt = data.get("target_prompt")
+        if not isinstance(target_prompt, str) or not target_prompt.strip():
+            await self.send_json({"type": "error", "message": "Target prompt cannot be empty"})
+            return
+        target_prompt = target_prompt.strip()
+
         session = await self.get_session(self.room_code)
+        if not session:
+            await self.send_json({"type": "error", "message": "Room not found"})
+            return
+        if session.stage == "PROMPTING" and _room_timer_active(self.room_code, "prompting"):
+            await self.send_json({"type": "error", "message": "A round is already in progress"})
+            return
+        if session.stage == "VOTING" and _room_timer_active(self.room_code, "voting"):
+            await self.send_json({"type": "error", "message": "Voting for the current submission is still in progress"})
+            return
+        _cancel_room_timer(self.room_code, "voting")
 
         await self.channel_layer.group_send(
             self.room_group_name,
@@ -217,9 +272,8 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             }
         )
 
-        if self._prompting_timer_task and not self._prompting_timer_task.done():
-            self._prompting_timer_task.cancel()
-        self._prompting_timer_task = asyncio.create_task(
+        _start_room_timer(
+            self.room_code, "prompting",
             self.run_prompting_timer(session.id, round_obj.id, session.prompt_time_limit)
         )
 
@@ -289,8 +343,19 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
         return submissions_list
 
     async def handle_submit_prompt(self, data):
+        if not self.player_id:
+            await self.send_json({"type": "error", "message": "You are not in this session"})
+            return
+
         prompt = data.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            await self.send_json({"type": "error", "message": "Prompt cannot be empty"})
+            return
+
         session = await self.get_session(self.room_code)
+        if not session:
+            await self.send_json({"type": "error", "message": "Room not found"})
+            return
         if session.stage != "PROMPTING":
             await self.send_json({"type": "error", "message": "Not in prompting stage"})
             return
@@ -333,12 +398,17 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             return
 
         session = await self.get_session(self.room_code)
+        if not session:
+            return
         if session.stage not in ("VOTING", "RESULTS"):
             await self.send_json({"type": "error", "message": "Not in voting stage"})
             return
 
         submission_id = data.get("submission_id")
-        submission_data = await self.get_submission_data(submission_id)
+        submission_data = await self.get_submission_data(submission_id, session)
+        if not submission_data:
+            await self.send_json({"type": "error", "message": "Submission not found"})
+            return
         history = submission_data.get("history", [])
         slideshow_delay = max(0, (len(history) - 1) * SLIDESHOW_INTERVAL_SECONDS)
 
@@ -354,9 +424,8 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             }
         )
 
-        if self._voting_timer_task and not self._voting_timer_task.done():
-            self._voting_timer_task.cancel()
-        self._voting_timer_task = asyncio.create_task(
+        _start_room_timer(
+            self.room_code, "voting",
             self.run_voting_timer(session.id, submission_id, session.vote_time_limit, slideshow_delay)
         )
 
@@ -400,8 +469,11 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
             logger.error("Error in voting timer for submission %s: %s", submission_id, e, exc_info=True)
 
     async def handle_submit_rating(self, data):
+        if not self.player_id:
+            return
+
         session = await self.get_session(self.room_code)
-        if session.stage != "VOTING":
+        if not session or session.stage != "VOTING":
             return
 
         try:
@@ -413,6 +485,11 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
 
         submission_id = data.get("submission_id")
         if not submission_id:
+            return
+
+        if not await self.player_belongs_to_session(self.player_id, session.id):
+            return
+        if not await self.submission_in_current_round(submission_id, session):
             return
 
         player = await self.get_player(self.player_id)
@@ -491,6 +568,8 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
         })
 
     async def handle_send_emoji(self, data):
+        if not self.player_id:
+            return
         emoji = data.get("emoji", "")
         allowed_emojis = ["🔥", "😂", "🎨", "🤯", "💀"]
         if emoji not in allowed_emojis:
@@ -531,10 +610,6 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
         return GameSession.objects.filter(code=code).first()
 
     @database_sync_to_async
-    def get_next_player_number(self, session):
-        return session.players.filter(is_admin=False).count() + 1
-
-    @database_sync_to_async
     def get_non_admin_player_count(self, session):
         return session.players.filter(is_admin=False).count()
 
@@ -549,15 +624,30 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def create_player(self, session, name, is_admin, channel_name):
-        player, created = Player.objects.get_or_create(
+        return Player.objects.create(
             session=session,
             name=name,
-            defaults={"is_admin": is_admin, "channel_name": channel_name}
+            is_admin=is_admin,
+            channel_name=channel_name,
+            token=secrets.token_hex(16),
         )
-        if not created:
-            player.channel_name = channel_name
-            player.save()
-        return player
+
+    @database_sync_to_async
+    def create_auto_named_player(self, session, channel_name):
+        base_number = session.players.filter(is_admin=False).count() + 1
+        for attempt in range(20):
+            try:
+                with transaction.atomic():
+                    return Player.objects.create(
+                        session=session,
+                        name=f"Player {base_number + attempt}",
+                        is_admin=False,
+                        channel_name=channel_name,
+                        token=secrets.token_hex(16),
+                    )
+            except IntegrityError:
+                continue
+        return None
 
     @database_sync_to_async
     def is_player_name_taken(self, session, name):
@@ -620,8 +710,18 @@ class GameConsumer(AsyncJsonWebsocketConsumer):
         return [item.image.url for item in submission.history.all().order_by("-created_at")]
 
     @database_sync_to_async
-    def get_submission_data(self, submission_id):
-        sub = Submission.objects.get(id=submission_id)
+    def submission_in_current_round(self, submission_id, session):
+        return Submission.objects.filter(
+            id=submission_id,
+            round__session=session,
+            round__round_number=session.current_round_number,
+        ).exists()
+
+    @database_sync_to_async
+    def get_submission_data(self, submission_id, session):
+        sub = Submission.objects.filter(id=submission_id, round__session=session).first()
+        if not sub:
+            return None
         history = list(sub.history.all().order_by("created_at"))
         history_data = [
             {

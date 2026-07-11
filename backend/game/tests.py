@@ -262,3 +262,143 @@ class PromptBattleGameTests(TransactionTestCase):
         await admin_comm.disconnect()
         await player1_comm.disconnect()
         await player2_comm.disconnect()
+
+
+class GameFixesTests(TransactionTestCase):
+    """Tests for room-scoped timers, join tokens, stage guards, and input validation."""
+
+    def _cancel_room_timers(self):
+        from .consumers import TIMER_TASKS
+        for task in list(TIMER_TASKS.values()):
+            if not task.done():
+                task.cancel()
+        TIMER_TASKS.clear()
+
+    async def _create_game(self, code, **overrides):
+        comm = WebsocketCommunicator(application, f"ws/game/{code}/")
+        connected, _ = await comm.connect()
+        self.assertTrue(connected)
+        data = {
+            "admin_name": "Host",
+            "prompt_time_limit": 60,
+            "vote_time_limit": 15,
+            "player_count": 4,
+        }
+        data.update(overrides)
+        await comm.send_json_to({"type": "create_game", "data": data})
+        response = await comm.receive_json_from()
+        self.assertEqual(response["type"], "game_created")
+        return comm, response["data"]
+
+    async def test_rejoin_requires_matching_token(self):
+        admin_comm, _ = await self._create_game("TOKN")
+
+        p1 = WebsocketCommunicator(application, "ws/game/TOKN/")
+        await p1.connect()
+        await p1.send_json_to({"type": "join_game", "data": {}})
+        joined = await p1.receive_json_from()
+        self.assertEqual(joined["type"], "game_joined")
+        player_id = joined["data"]["player_id"]
+        token = joined["data"]["player_token"]
+        self.assertTrue(token)
+
+        # Wrong token: must NOT be resumed as Player 1; falls back to a fresh join
+        imposter = WebsocketCommunicator(application, "ws/game/TOKN/")
+        await imposter.connect()
+        await imposter.send_json_to({
+            "type": "join_game",
+            "data": {"player_id": player_id, "player_token": "wrong"},
+        })
+        resp = await imposter.receive_json_from()
+        self.assertEqual(resp["type"], "game_joined")
+        self.assertNotEqual(resp["data"]["player_id"], player_id)
+
+        # Correct token: resumes the same player
+        rejoin = WebsocketCommunicator(application, "ws/game/TOKN/")
+        await rejoin.connect()
+        await rejoin.send_json_to({
+            "type": "join_game",
+            "data": {"player_id": player_id, "player_token": token},
+        })
+        resp = await rejoin.receive_json_from()
+        self.assertEqual(resp["type"], "game_joined")
+        self.assertEqual(resp["data"]["player_id"], player_id)
+
+        for c in (admin_comm, p1, imposter, rejoin):
+            await c.disconnect()
+
+    async def test_start_round_guards(self):
+        admin_comm, _ = await self._create_game("GRDS")
+        try:
+            # Empty target prompt rejected
+            await admin_comm.send_json_to({"type": "start_round", "data": {"target_prompt": "  "}})
+            resp = await admin_comm.receive_json_from()
+            self.assertEqual(resp["type"], "error")
+
+            # Valid start (no API key -> fallback image)
+            await admin_comm.send_json_to({"type": "start_round", "data": {"target_prompt": "a red apple"}})
+            resp = await admin_comm.receive_json_from()
+            self.assertEqual(resp["type"], "status_update")
+            resp = await admin_comm.receive_json_from()
+            self.assertEqual(resp["type"], "round_started")
+
+            # Second start while the round is running is rejected
+            await admin_comm.send_json_to({"type": "start_round", "data": {"target_prompt": "another"}})
+            resp = await admin_comm.receive_json_from()
+            self.assertEqual(resp["type"], "error")
+            self.assertIn("already in progress", resp["message"])
+        finally:
+            self._cancel_room_timers()
+            await admin_comm.disconnect()
+
+    async def test_malformed_messages_do_not_kill_socket(self):
+        admin_comm, _ = await self._create_game("MALF")
+        p1 = WebsocketCommunicator(application, "ws/game/MALF/")
+        await p1.connect()
+        await p1.send_json_to({"type": "join_game", "data": {}})
+        joined = await p1.receive_json_from()
+        self.assertEqual(joined["type"], "game_joined")
+        await admin_comm.receive_json_from()  # players_list
+        await p1.receive_json_from()  # players_list broadcast reaches p1 too
+
+        # Null prompt -> error message, not a crash
+        await p1.send_json_to({"type": "submit_prompt", "data": {"prompt": None}})
+        resp = await p1.receive_json_from()
+        self.assertEqual(resp["type"], "error")
+
+        # Bogus rating id -> silently ignored, socket stays alive
+        await p1.send_json_to({"type": "submit_rating", "data": {"submission_id": 999999, "score": 5}})
+
+        # Socket still works: emoji round-trips
+        await p1.send_json_to({"type": "send_emoji", "data": {"emoji": "🔥"}})
+        resp = await p1.receive_json_from()
+        self.assertEqual(resp["type"], "emoji_reaction")
+
+        await p1.disconnect()
+        await admin_comm.disconnect()
+
+    async def test_rating_scoped_to_current_round_and_session(self):
+        consumer = GameConsumer()
+        session_a = await consumer.create_session("SESA", 60, 15, 3)
+        session_b = await consumer.create_session("SESB", 60, 15, 3)
+        player_b = await consumer.create_player(session_b, "Bee", is_admin=False, channel_name="c1")
+        round_b = await consumer.create_next_round(session_b, "target", b"bytes")
+        sub_b, _ = await consumer.save_submission_and_history(round_b, player_b, "prompt", b"img")
+
+        # Submission from session B is not ratable within session A
+        self.assertFalse(await consumer.submission_in_current_round(sub_b.id, session_a))
+        # But it is within its own session's current round
+        session_b = await consumer.get_session("SESB")
+        self.assertTrue(await consumer.submission_in_current_round(sub_b.id, session_b))
+
+    async def test_concurrent_auto_names_unique(self):
+        consumer = GameConsumer()
+        session = await consumer.create_session("UNIQ", 60, 15, 5)
+        p1 = await consumer.create_auto_named_player(session, "c1")
+        p2 = await consumer.create_auto_named_player(session, "c2")
+        self.assertNotEqual(p1.id, p2.id)
+        self.assertNotEqual(p1.name, p2.name)
+        # Direct duplicate named create raises instead of silently sharing identity
+        await consumer.create_player(session, "Dup", is_admin=False, channel_name="c3")
+        with self.assertRaises(IntegrityError):
+            await consumer.create_player(session, "Dup", is_admin=False, channel_name="c4")

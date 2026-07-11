@@ -63,7 +63,7 @@ def evaluate_image_similarity(target_image_bytes: bytes, submission_image_bytes:
         )
         
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             contents=[prompt, target_img, submission_img]
         )
         
